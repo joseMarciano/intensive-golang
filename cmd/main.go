@@ -2,8 +2,12 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"github.com/joseMarciano/intensive-golang/internal/order/infra/database"
 	"github.com/joseMarciano/intensive-golang/internal/order/usecase"
+	"github.com/joseMarciano/intensive-golang/package/rabbitmq"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
@@ -16,16 +20,42 @@ func main() {
 
 	repository := database.NewOrderRepository(db)
 	calculateFinalPriceUseCase := usecase.NewCalculateFinalPriceUseCase(repository)
-	input := usecase.OrderInputDTO{
-		ID:    "99",
-		Tax:   12,
-		Price: 50.33,
-	}
 
-	output, err := calculateFinalPriceUseCase.Execute(input)
+	ch, err := rabbitmq.OpenChannel()
 	if err != nil {
 		panic(err)
 	}
 
-	println(output)
+	defer ch.Close()
+
+	deliveryMessage := make(chan amqp.Delivery)
+	forever := make(chan bool)
+
+	go rabbitmq.Consume(ch, deliveryMessage)
+	go worker(deliveryMessage, calculateFinalPriceUseCase, 1)
+	go worker(deliveryMessage, calculateFinalPriceUseCase, 2)
+	go worker(deliveryMessage, calculateFinalPriceUseCase, 3)
+
+	<-forever
+}
+
+func worker(deliveryMessage <-chan amqp.Delivery, useCase *usecase.CalculateFinalPriceUseCase, workerId int) {
+	for message := range deliveryMessage {
+		var input = usecase.OrderInputDTO{}
+		err := json.Unmarshal(message.Body, &input)
+		if err != nil {
+			fmt.Printf("Error on unmarshal %v", err)
+		}
+
+		input.Tax = 5.54
+
+		_, err = useCase.Execute(input)
+
+		if err != nil {
+			panic(err)
+		}
+
+		println("Received message: ", workerId)
+		message.Ack(false)
+	}
 }
