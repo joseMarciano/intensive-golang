@@ -8,6 +8,7 @@ import (
 	"github.com/joseMarciano/intensive-golang/internal/order/usecase"
 	"github.com/joseMarciano/intensive-golang/package/rabbitmq"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"net/http"
 )
 
 func main() {
@@ -35,6 +36,20 @@ func main() {
 	go worker(deliveryMessage, calculateFinalPriceUseCase, 1)
 	go worker(deliveryMessage, calculateFinalPriceUseCase, 2)
 	go worker(deliveryMessage, calculateFinalPriceUseCase, 3)
+
+	http.HandleFunc("/total", func(writer http.ResponseWriter, request *http.Request) {
+		uc := usecase.NewGetTotalUseCase(repository)
+		output, err := uc.Execute()
+		if err != nil {
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(writer).Encode(output)
+
+	})
+
+	http.ListenAndServe(":8181", nil)
 
 	<-forever
 }
